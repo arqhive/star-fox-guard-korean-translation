@@ -162,15 +162,15 @@
  "ui_msg_firsttime.dat|messmsg_firsttime.mcd|49|0": "계약서",
  "ui_msg_firsttime.dat|messmsg_firsttime.mcd|50|0": "코네리아 특수금속\n스페셜 대사장 그리피 토드는",
  "ui_msg_firsttime.dat|messmsg_firsttime.mcd|51|0": "귀하를 우리 회사 레어메탈 채굴\n타워 방어 임무에 투입하여\n팍팍 일하게 할 것을\n이에 약속한다.",
- "ui_msg_firsttime.dat|messmsg_firsttime.mcd|53|0": "세이브 데이터 생성 중입니다",
- "ui_msg_firsttime.dat|messmsg_firsttime.mcd|54|0": "특별 체험판 세이브 데이터를\n이어받는 중입니다",
- "ui_msg_firsttime.dat|messmsg_firsttime.mcd|55|0": "특별 체험판 세이브 데이터를\n이어받지 못했습니다\n새로 데이터를 만듭니다",
- "ui_msg_firsttime.dat|messmsg_firsttime.mcd|56|0": "세이브 데이터를 만들지 못했습니다\nWii U 메뉴로 돌아갑니다",
+ "ui_msg_firsttime.dat|messmsg_firsttime.mcd|53|0": "세이브 데이터 생성 중입니다.",
+ "ui_msg_firsttime.dat|messmsg_firsttime.mcd|54|0": "특별 체험판 세이브 데이터를\n이어받는 중입니다.",
+ "ui_msg_firsttime.dat|messmsg_firsttime.mcd|55|0": "특별 체험판 세이브 데이터를\n이어받지 못했습니다.\n새로 데이터를 만듭니다.",
+ "ui_msg_firsttime.dat|messmsg_firsttime.mcd|56|0": "세이브 데이터를 만들지 못했습니다.\nWii U 메뉴로 돌아갑니다.",
  "ui_msg_firsttime.dat|messmsg_firsttime.mcd|57|0": "채굴 기지 방어 시스템",
  "ui_msg_firsttime.dat|messmsg_firsttime.mcd|58|0": "프로테캠",
  "ui_msg_firsttime.dat|messmsg_firsttime.mcd|59|0": "코네리아 특수금속",
  "ui_msg_firsttime.dat|messmsg_firsttime.mcd|60|0": "코네리아 채굴 기지",
  "ui_msg_firsttime.dat|messmsg_firsttime.mcd|61|0": "고순도 레어메탈 시설",
  "ui_msg_firsttime.dat|messmsg_firsttime.mcd|62|0": "컨트롤 타워",
- "ui_msg_firsttime.dat|messmsg_firsttime.mcd|63|0": "'스타폭스 가드'의\n특별 체험판 세이브 데이터를\n발견했습니다\n이어받으시겠습니까?"
+ "ui_msg_firsttime.dat|messmsg_firsttime.mcd|63|0": "'스타폭스 가드'의\n특별 체험판 세이브 데이터를\n발견했습니다.\n이어받으시겠습니까?"
 }

@@ -32,7 +32,7 @@
 | 패치 적용 결과 | 값 |
 |---|---|
 | 크기 | 572,957,184 바이트 |
-| MD5 | `ea030fba2d0b6a75b511b197c84970a8` |
+| MD5 | `59dbec0521dd91d02e846d2d093ece6b` |
 
 적용 후 SD 카드의 아래 경로에 넣고 Aroma에서 SDCafiine(콘텐츠 리디렉션)을 켜면 됩니다.
 
@@ -87,7 +87,7 @@ python tools/tl_tool.py merge          # 검수 결과를 엑셀에 반영
 ### 배포 꾸러미 만들기
 
 ```bash
-python tools/make_release.py --version v0.9   # 원본과 빌드를 비교해 release/patcher/payload 생성
+python tools/make_release.py --version v0.9.1  # 원본과 빌드를 비교해 release/patcher/payload 생성
 ```
 
 `payload`에는 한글 MCD·글리프 아틀라스와, 한글로 고친 텍스처의 달라진 바이트 구간만 담깁니다.
