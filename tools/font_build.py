@@ -18,6 +18,7 @@ from bc1 import bc1_encode_blocks
 
 KO_FONT = r'C:\Windows\Fonts\NotoSansKR-VF.ttf'
 KO_WEIGHT = 800
+XSCALE = 0.94  # 한글 가로 축약(원본 칸이 일본어 폭 기준이라 여유 확보)
 SS = 4  # 슈퍼샘플링
 REF = '한국어글뷁빼앎'
 PAD = 2  # atlas 셀 사이 여백
@@ -90,11 +91,19 @@ class FontStyle:
         return (min(b[0] for b in bbs), min(b[1] for b in bbs), max(b[2] for b in bbs), max(b[3] for b in bbs))
 
     def render(self, ch):
-        """-> rgba cell (h x w)"""
+        """-> rgba cell (h x w). 한글은 가로로 XSCALE 만큼 살짝 좁혀 그린다
+        (원본 UI 칸이 일본어 폭에 맞춰져 있어 여유를 두기 위함)."""
         bb = self.font.getbbox(ch)
         wide = self.left + (bb[2] - bb[0]) // SS + self.rpad + 4
         im = Image.new('L', (wide * SS, self.h * SS), 0)
         ImageDraw.Draw(im).text((self.left * SS - bb[0], self.oy), ch, fill=255, font=self.font)
+        scale = XSCALE if '가' <= ch <= '힣' else 1.0
+        if scale != 1.0:  # 잉크만 좁히고 왼쪽 여백은 유지
+            body = im.crop((self.left * SS, 0, wide * SS, self.h * SS))
+            body = body.resize((max(1, round(body.width * scale)), body.height), Image.LANCZOS)
+            im2 = Image.new('L', im.size, 0)
+            im2.paste(body, (self.left * SS, 0))
+            im = im2
         a = np.asarray(im.resize((wide, self.h), Image.LANCZOS))
         # 실제 잉크 기준으로 폭 결정 (getbbox 는 안티앨리어싱 여백 포함이라 1~3px 넓음)
         xs = np.nonzero(a.max(0) > 40)[0]
