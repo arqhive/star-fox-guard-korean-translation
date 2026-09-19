@@ -6,7 +6,8 @@
 줄폭: 원본 MCD 글리프 폭 + 줄 간격값(a) + 커닝으로 원문 각 줄 픽셀 폭 계산.
 한글 추정폭 = 폰트별 한자·가나 중앙값 - 3, 영숫자·기호 = 같은 폰트 원본 글리프 폭(없으면 한글폭 x 0.55),
 공백 = 폰트표 폭 + a, 버튼 아이콘 = 원문과 같게.
-한도 = max(원문 최장줄 x 1.08, 원문 최장줄 + 한글 1자) (문단 단위)
+한도(문단 단위): 긴 문장(원문 최장줄 250px 이상)은 원문 폭 그대로 — 대사창·티커 칸이 원문 폭에
+맞춰져 있어 조금만 넘쳐도 잘린다. 짧은 라벨은 버튼 여백이 있어 10% 여유를 준다.
 """
 import sys, os, re, json, glob, statistics
 from collections import defaultdict
@@ -38,6 +39,8 @@ class Metrics:
         self.char_w = {}  # (font, char) -> w
         self.font_tab = {}
         self.mcds = {}
+        self._styles = {}
+        self._rendered = {}
         for p, dat, mcd, data in iter_mcds():
             M = parse_mcd(data)
             self.mcds[(dat, mcd)] = M
@@ -50,9 +53,53 @@ class Metrics:
                 self.char_w.setdefault((fo, ch), w)
 
     def hangul_w(self, font):
+        """대략값(한도 계산용). 실제 글자 폭은 ko_char_w 가 렌더해서 잰다."""
         if self.cjk.get(font):
             return statistics.median(self.cjk[font]) - 3
         return self.font_tab[font][2] * 0.75
+
+    def _style(self, font):
+        """폰트별 한글 렌더러 (원본 아틀라스에서 크기·여백을 측정)"""
+        if font in self._styles:
+            return self._styles[font]
+        from dat_lib import read_dat
+        from wtb_lib import parse_wta, decode
+        from font_build import FontStyle
+        st = None
+        for p, dat, mcd, data in iter_mcds():
+            M = self.mcds[(dat, mcd)]
+            if font not in {s[0] for s in M['syms']}:
+                continue
+            ents = {e['name']: e['data'] for e in read_dat(open(p, 'rb').read())}
+            base = mcd[:-4]
+            T = parse_wta(ents[base + '.wta'])
+            img = decode(T[0], ents[base + '.wtp'])
+            W, H = T[0]['surf']['width'], T[0]['surf']['height']
+            samples = []
+            for f, ch, gi in M['syms']:
+                if f != font:
+                    continue
+                g = M['glyphs'][gi]
+                x0, y0 = int(round(g[1] * W)), int(round(g[2] * H))
+                x1, y1 = int(round(g[3] * W)), int(round(g[4] * H))
+                samples.append((chr(ch), img[y0:y1, x0:x1], g))
+            if samples:
+                st = FontStyle(font, samples)
+                break
+        self._styles[font] = st
+        return st
+
+    def ko_char_w(self, font, ch):
+        """실제 글리프 폭. 원본에 있는 글자는 그 값, 한글은 렌더해서 잰다."""
+        key = (font, ord(ch))
+        if key in self.char_w:
+            return self.char_w[key]
+        if key in self._rendered:
+            return self._rendered[key]
+        st = self._style(font)
+        w = st.render(ch).shape[1] if st else self.hangul_w(font)
+        self._rendered[key] = w
+        return w
 
     def jp_line_widths(self, M, pa):
         out = []
@@ -72,18 +119,14 @@ class Metrics:
 
     def ko_line_width(self, text, font, a):
         x = 0
-        hw = self.hangul_w(font)
         for m in re.finditer(r'\{btn:\d+\}|\{\{|\}\}|.', text):
             t = m.group()
             if t.startswith('{btn'):
                 x += self.font_tab[font][2] * 0.8
             elif t == ' ':
                 x += self.font_tab[font][1] + a
-            elif '가' <= t <= '힣':
-                x += hw + a
             else:
-                ch = t[0]
-                x += self.char_w.get((font, ord(ch)), hw * 0.55) + a
+                x += self.ko_char_w(font, t[0]) + a
         return x
 
 
@@ -104,7 +147,7 @@ def split():
         pa = M['msgs'][r['msg']]['paras'][r['para']]
         widths = met.jp_line_widths(M, pa)
         mx = max(widths)
-        limit = max(mx * 1.08, mx + met.hangul_w(r['font']))
+        limit = mx if mx >= 250 else mx * 1.10
         item = dict(id=r['id'], file=r['mcd'], event=r['event'],
                     ja=TAG_RE.sub(lambda m: m.group() if m.group(1) == 'btn' else '', r['ja']),
                     lines=len(pa['lines']), max_chars=int(limit // (met.hangul_w(r['font']) + pa['lines'][0]['a'])))
@@ -152,7 +195,7 @@ def check(name, met=None, quiet=False):
         if len(lines) > len(pa['lines']):
             errs.append(f'#{i}: 줄 수 초과 {len(lines)} > {len(pa["lines"])}')
         widths = met.jp_line_widths(M, pa); mx = max(widths)
-        limit = max(mx * 1.08, mx + met.hangul_w(pa['font']))
+        limit = mx if mx >= 250 else mx * 1.10
         for li, t in enumerate(lines):
             a = pa['lines'][min(li, len(pa['lines']) - 1)]['a']
             w = met.ko_line_width(t, pa['font'], a)
