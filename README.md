@@ -8,8 +8,9 @@
 - 게임 내 일본어 텍스트 전체 한글화 (1,529문단 — 메뉴, 튜토리얼, 스토리 대사, 방해 통신, 도움말, 크레딧)
 - 글자는 원본 UI 글꼴 모양에 맞춰 새로 그려 넣음 (Noto Sans KR 기반, MCD 전용 글리프 아틀라스 재생성)
 - 그림 속 일본어 2장 한글화 (프롤로그 계약서, 크레딧 손글씨 서명)
+- v1.1: 계약서·크레딧 서명을 손글씨로 개선하고 계약서 도장 주변 잔흔 정리 (대사·폰트 데이터 변경 없음)
 - 인물·지명은 한국 정식 발매작(스타폭스 2026, 스타폭스 64 3D) 표기 기준 — 폭스 맥클라우드, 팔코 람바디, 페피 헤어, 슬리피 토드, 안돌프, 코네리아
-- 확인 환경: 실기 Wii U + Aroma SDCafiine (부팅·프롤로그·미션 진행 확인)
+- v1.0 확인 환경: 실기 Wii U + Aroma SDCafiine (부팅·프롤로그·미션 진행 확인). v1.1 그래픽은 압축 텍스처 및 패치 재현 검증 완료, 실기 확인 전입니다.
 
 > 이 저장소에는 **게임 데이터(CPK, 추출한 원문 대사, 원본 텍스처)가 들어 있지 않습니다.**
 > 패치를 만들거나 적용하려면 본인이 소유한 게임에서 직접 덤프·복호화한 원본이 필요합니다.
@@ -32,7 +33,7 @@
 | 패치 적용 결과 | 값 |
 |---|---|
 | 크기 | 572,957,184 바이트 |
-| MD5 | `7a765487f392b0f96472ce31eebf3b21` |
+| MD5 | `9181ea49e6b5276b2dc11bda08ec45a5` |
 
 적용 후 SD 카드의 아래 경로에 넣고 Aroma에서 SDCafiine(콘텐츠 리디렉션)을 켜면 됩니다.
 
@@ -60,8 +61,9 @@ python tools/build.py --sd E:          # 빌드 후 SD 카드까지 복사
 python tools/build.py --only ui_title.dat
 ```
 
-결과는 `build/sdcafiine/00050000101BEB00/KoreanTranslation/content/data000.cpk`에 생성되며,
-위 "패치 적용 결과" 해시와 바이트 단위로 같습니다.
+결과는 `build/sdcafiine/00050000101BEB00/KoreanTranslation/content/data000.cpk`에 생성됩니다.
+위 해시는 배포하는 v1.1 이미지가 반영된 결과입니다. 그래픽 생성 입력과 재생성 방법은
+[`docs/GRAPHICS_V11.md`](docs/GRAPHICS_V11.md)를 참고하세요.
 
 `build.py`가 하는 일:
 
@@ -87,7 +89,7 @@ python tools/tl_tool.py merge          # 검수 결과를 엑셀에 반영
 ### 배포 꾸러미 만들기
 
 ```bash
-python tools/make_release.py --version v1.0  # 원본과 빌드를 비교해 release/patcher/payload 생성
+python tools/make_release.py --version v1.1  # 원본과 빌드를 비교해 release/patcher/payload 생성
 ```
 
 `payload`에는 한글 MCD·글리프 아틀라스와, 한글로 고친 텍스처의 달라진 바이트 구간만 담깁니다.

@@ -18,6 +18,7 @@ release/python/
 translation/work/
 translation/sfg_text.xlsx
 translation/images_ko/
+translation/images_source/
 
 __pycache__/
 *.pyc
