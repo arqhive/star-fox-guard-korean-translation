@@ -119,7 +119,7 @@ docs/          파일 형식, 그래픽 작업 기록, 문체 규칙, 릴리즈 
 
 ## 크레딧·라이선스
 
-- 이 저장소의 도구 코드와 패치: [MIT License](LICENSE) (© 2026 arqhive). 한국어 번역문의 저작권은 제작자에게 있습니다.
+- 이 저장소의 도구 코드, 한국어 번역문, 문서: [MIT License](LICENSE) (© 2026 arqhive).
 - 한글 글리프는 [Noto Sans KR](https://fonts.google.com/noto/specimen/Noto+Sans+KR)(SIL Open Font License 1.1)로 그렸습니다.
 
 ## 면책
