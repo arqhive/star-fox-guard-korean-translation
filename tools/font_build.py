@@ -17,7 +17,12 @@ from wtb_lib import parse_wta, decode
 from bc1 import bc1_encode_blocks
 
 KO_FONT = r'C:\Windows\Fonts\NotoSansKR-VF.ttf'
-KO_WEIGHT = 800
+KO_WEIGHT = 800  # 자동 선택이 안 되는 폰트(가변 축 없음 등)에 쓰는 기본 굵기
+AUTO_WEIGHT = True  # 원본 글자의 획 두께에 맞춰 폰트(=구간)마다 굵기를 따로 고른다
+WEIGHT_RANGE = (350, 900)
+BOLDEN = True  # 최대 굵기로도 원본보다 가늘면 획을 팽창시켜(덧칠) 두께를 맞춘다
+BOLDEN_MAX = 0.12  # 팽창 상한: 글자 높이 대비 획 두께 증가량
+OPEN_MIN = 0.70  # 팽창 후 글자 속공간이 팽창 전의 이 비율 밑으로 줄면 멈춘다(르·포 틈이 막히지 않게)
 XSCALE = 0.94  # 한글 가로 축약(원본 칸이 일본어 폭 기준이라 여유 확보)
 SS = 4  # 슈퍼샘플링
 REF = '한국어글뷁빼앎'
@@ -26,6 +31,19 @@ PAD = 2  # atlas 셀 사이 여백
 
 def _is_ref(c):
     return 0x4E00 <= c <= 0x9FFF or 0xAC00 <= c <= 0xD7A3
+
+
+def _dilate(im, r):
+    import cv2
+    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1))
+    return Image.fromarray(cv2.dilate(np.asarray(im), k))
+
+
+def _stroke(a):
+    """획 두께 ≈ 2 x 잉크 면적 / 윤곽 길이 (글자 복잡도에 덜 민감하다)"""
+    m = np.asarray(a) > 127
+    edge = np.abs(np.diff(m, axis=1)).sum() + np.abs(np.diff(m, axis=0)).sum()
+    return 2 * m.sum() / max(edge, 1)
 
 
 def _is_kana(c):
@@ -64,24 +82,77 @@ class FontStyle:
                     e += np.abs(d - cell[..., 0].astype(int)).mean()
                 errs[k] = e
             self.k = min(errs, key=errs.get)
-        self._setup_font()
+        # 원본 글자의 획 두께 (구간마다 다르다: 작은 대사는 가늘고 큰 제목은 두껍다)
+        self.th_target = float(np.mean([_stroke(c[..., 3]) for _, c, _ in refs[:16]])) if refs else None
+        self.weight = KO_WEIGHT
+        self.dil = 0  # 획 팽창 반경 (슈퍼샘플 px)
+        self._setup_font(self.weight)
+        if AUTO_WEIGHT and self.th_target and self._variable():
+            self._pick_weight()
+        if BOLDEN and self.th_target and self._stroke_now() < self.th_target * 0.97:
+            self._pick_dilation()
 
-    def _setup_font(self):
+    def _variable(self):
+        try:
+            ImageFont.truetype(KO_FONT, 32).set_variation_by_axes([KO_WEIGHT])
+            return True
+        except Exception:
+            return False
+
+    def _pick_weight(self):
+        """원본 획 두께에 가장 가까운 굵기를 이분 탐색으로 고른다"""
+        lo, hi = WEIGHT_RANGE
+        for _ in range(7):
+            mid = (lo + hi) / 2
+            self._setup_font(mid)
+            if self._stroke_now() < self.th_target:
+                lo = mid
+            else:
+                hi = mid
+        self.weight = round((lo + hi) / 2)
+        self._setup_font(self.weight)
+
+    def _pick_dilation(self):
+        """굵기를 다 올려도 모자란 두께를 획 팽창으로 채운다 (상한 BOLDEN_MAX)"""
+        self.dil = 0
+        base = self._open_now()
+        lo, hi = 0, max(1, int(self.h * BOLDEN_MAX * SS / 2))
+        while lo < hi:  # 두께는 반경에 단조 증가, 속공간은 단조 감소
+            self.dil = (lo + hi + 1) // 2
+            if self._stroke_now() <= self.th_target and self._open_now() >= base * OPEN_MIN:
+                lo = self.dil
+            else:
+                hi = self.dil - 1
+        self.dil = lo
+
+    def _open_now(self):
+        """잉크 상자 안의 빈 곳 비율(글자 속공간) 평균"""
+        v = []
+        for c in REF:
+            a = self.render(c)[..., 3] > 127
+            ys, xs = np.nonzero(a)
+            v.append(1 - a[ys.min():ys.max() + 1, xs.min():xs.max() + 1].mean())
+        return float(np.mean(v))
+
+    def _stroke_now(self):
+        return float(np.mean([_stroke(self.render(c)[..., 3]) for c in REF]))
+
+    def _setup_font(self, weight):
         tgt = (self.bottom - self.top + 1) * SS
         size = tgt
         for _ in range(4):
-            font = self._font(size)
+            font = self._font(size, weight)
             bb = self._bbox(font)
             size = max(4, int(round(size * tgt / (bb[3] - bb[1]))))
-        self.font = self._font(size)
+        self.font = self._font(size, weight)
         bb = self._bbox(self.font)
         self.oy = self.top * SS - bb[1]
 
     @staticmethod
-    def _font(size):
+    def _font(size, weight=None):
         f = ImageFont.truetype(KO_FONT, size)
         try:
-            f.set_variation_by_axes([KO_WEIGHT])
+            f.set_variation_by_axes([KO_WEIGHT if weight is None else weight])
         except Exception:
             pass
         return f
@@ -94,16 +165,20 @@ class FontStyle:
         """-> rgba cell (h x w). 한글은 가로로 XSCALE 만큼 살짝 좁혀 그린다
         (원본 UI 칸이 일본어 폭에 맞춰져 있어 여유를 두기 위함)."""
         bb = self.font.getbbox(ch)
-        wide = self.left + (bb[2] - bb[0]) // SS + self.rpad + 4
+        d = self.dil  # 팽창하면 잉크가 좌우로 d 만큼 번지므로 그만큼 안쪽에서 그린다
+        wide = self.left + (bb[2] - bb[0] + 2 * d) // SS + self.rpad + 4
+        x0 = self.left * SS + d
         im = Image.new('L', (wide * SS, self.h * SS), 0)
-        ImageDraw.Draw(im).text((self.left * SS - bb[0], self.oy), ch, fill=255, font=self.font)
+        ImageDraw.Draw(im).text((x0 - bb[0], self.oy), ch, fill=255, font=self.font)
         scale = XSCALE if '가' <= ch <= '힣' else 1.0
         if scale != 1.0:  # 잉크만 좁히고 왼쪽 여백은 유지
-            body = im.crop((self.left * SS, 0, wide * SS, self.h * SS))
+            body = im.crop((x0, 0, wide * SS, self.h * SS))
             body = body.resize((max(1, round(body.width * scale)), body.height), Image.LANCZOS)
             im2 = Image.new('L', im.size, 0)
-            im2.paste(body, (self.left * SS, 0))
+            im2.paste(body, (x0, 0))
             im = im2
+        if d:  # 원형 커널로 팽창해 획을 고르게 두껍게(모서리가 네모나지 않게)
+            im = _dilate(im, d)
         a = np.asarray(im.resize((wide, self.h), Image.LANCZOS))
         # 실제 잉크 기준으로 폭 결정 (getbbox 는 안티앨리어싱 여백 포함이라 1~3px 넓음)
         xs = np.nonzero(a.max(0) > 40)[0]

@@ -14,7 +14,7 @@ HEAD = ['ID', 'DAT', 'MCD', 'Msg', 'Para', 'Font', 'Event', '일본어 원문', 
 
 
 def dat_files():
-    return sorted(glob.glob(os.path.join(EXTRACT, 'ui_*.dat'))) + [os.path.join(EXTRACT, 'core_coreui.dat')]
+    return sorted(glob.glob(os.path.join(glob.escape(EXTRACT), 'ui_*.dat'))) + [os.path.join(EXTRACT, 'core_coreui.dat')]
 
 
 def iter_mcds():

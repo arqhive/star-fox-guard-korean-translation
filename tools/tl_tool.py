@@ -163,7 +163,7 @@ def check(name, met=None, quiet=False):
     met = met or Metrics()
     src = {i['id']: i for i in json.load(open(os.path.join(WORK, f'in_{name}.json'), encoding='utf-8'))}
     outs = {}
-    for p in sorted(glob.glob(os.path.join(WORK, f'out_{name}*.json'))):
+    for p in sorted(glob.glob(os.path.join(glob.escape(WORK), f'out_{name}*.json'))):
         for it in json.load(open(p, encoding='utf-8')):
             outs[it['id']] = it['ko']
     rows = {r['id']: r for r in rows_from_xlsx()}
@@ -211,7 +211,7 @@ def check(name, met=None, quiet=False):
 def merge():
     met = Metrics()
     allout = {}
-    for p in sorted(glob.glob(os.path.join(WORK, 'in_*.json'))):
+    for p in sorted(glob.glob(os.path.join(glob.escape(WORK), 'in_*.json'))):
         name = os.path.basename(p)[3:-5]
         errs, outs = check(name, met, quiet=True)
         print(name, len(outs), 'errors', len(errs))
@@ -230,6 +230,6 @@ if __name__ == '__main__':
     if cmd == 'split': split()
     elif cmd == 'check':
         met = Metrics()
-        names = [os.path.basename(p)[3:-5] for p in sorted(glob.glob(os.path.join(WORK, 'in_*.json')))] if sys.argv[2] == 'all' else [sys.argv[2]]
+        names = [os.path.basename(p)[3:-5] for p in sorted(glob.glob(os.path.join(glob.escape(WORK), 'in_*.json')))] if sys.argv[2] == 'all' else [sys.argv[2]]
         for n in names: check(n, met)
     elif cmd == 'merge': merge()

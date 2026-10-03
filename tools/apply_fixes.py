@@ -3,7 +3,7 @@ import json, glob, sys, os
 WORK = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'translation', 'work')
 fixes = {int(k): v for k, v in json.load(open(sys.argv[1], encoding='utf-8')).items()}
 done = set()
-for p in sorted(glob.glob(os.path.join(WORK, 'out_*.json'))):
+for p in sorted(glob.glob(os.path.join(glob.escape(WORK), 'out_*.json'))):
     items = json.load(open(p, encoding='utf-8')); ch = False
     for it in items:
         if it['id'] in fixes:

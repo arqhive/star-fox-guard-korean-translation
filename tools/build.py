@@ -35,7 +35,7 @@ def load_translations():
     """번역 원본은 translation/ko/*.json ("dat|mcd|msg|para": "번역문").
     없을 때만 작업용 엑셀(translation/sfg_text.xlsx)에서 읽는다."""
     tl = {}
-    for p in sorted(glob.glob(os.path.join(ROOT, 'translation', 'ko', '*.json'))):
+    for p in sorted(glob.glob(os.path.join(glob.escape(ROOT), 'translation', 'ko', '*.json'))):
         for k, v in json.load(open(p, encoding='utf-8')).items():
             dat, mcd, mi, pi = k.split('|')
             tl[(dat, mcd, int(mi), int(pi))] = v.replace('\r\n', '\n')

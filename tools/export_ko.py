@@ -21,7 +21,7 @@ rows = {}
 for r in ws.iter_rows(min_row=2, values_only=True):
     rows[r[0]] = (f'{r[1]}|{r[2]}|{r[3]}|{r[4]}', r[8])
 
-for p in sorted(glob.glob(os.path.join(WORK, 'in_*.json'))):
+for p in sorted(glob.glob(os.path.join(glob.escape(WORK), 'in_*.json'))):
     name = CHUNKS[os.path.basename(p)[3:-5]]
     out = {}
     for it in json.load(open(p, encoding='utf-8')):
