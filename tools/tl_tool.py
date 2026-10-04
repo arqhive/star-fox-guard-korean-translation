@@ -15,6 +15,7 @@ import openpyxl
 
 from text_tool import XLSX, iter_mcds, para_text
 from mcd_lib import parse_mcd
+from font_build import redraw
 
 WORK = os.path.join(os.path.dirname(XLSX), 'work')
 JP_RE = re.compile(r'[぀-ヿ㐀-鿿！-～]')
@@ -41,9 +42,15 @@ class Metrics:
         self.mcds = {}
         self._styles = {}
         self._rendered = {}
+        self.cur = None  # 지금 재는 문단의 (dat, mcd)
+        self.paths = {}
+        self.mcd_char_w = defaultdict(dict)
         for p, dat, mcd, data in iter_mcds():
             M = parse_mcd(data)
             self.mcds[(dat, mcd)] = M
+            self.paths[(dat, mcd)] = p
+            for fo, ch, gi in M['syms']:
+                self.mcd_char_w[(dat, mcd)][(fo, ch)] = M['glyphs'][gi][5]
             for f in M['fonts']:
                 self.font_tab[f[0]] = f
             for fo, ch, gi in M['syms']:
@@ -59,17 +66,24 @@ class Metrics:
         return self.font_tab[font][2] * 0.75
 
     def _style(self, font):
-        """폰트별 한글 렌더러 (원본 아틀라스에서 크기·여백을 측정)"""
-        if font in self._styles:
-            return self._styles[font]
+        """폰트별 한글 렌더러. 빌드(font_build.build_atlas)와 똑같이 **현재 MCD(self.cur)** 의
+        원본 아틀라스에서 측정한다 (폰트 번호가 같아도 MCD마다 여백·두께가 다르다)."""
+        key = (self.cur, font)
+        if key in self._styles:
+            return self._styles[key]
         from dat_lib import read_dat
         from wtb_lib import parse_wta, decode
         from font_build import FontStyle
+        order = [self.cur] if self.cur else []
+        order += [k for k in self.mcds if k != self.cur and font in {s[0] for s in self.mcds[k]['syms']}]
         st = None
-        for p, dat, mcd, data in iter_mcds():
+        for dat, mcd in order:
             M = self.mcds[(dat, mcd)]
-            if font not in {s[0] for s in M['syms']}:
+            fonts = {s[0] for s in M['syms']}
+            if not fonts:
                 continue
+            f_use = font if font in fonts else min(fonts, key=lambda x: abs(x - font))  # 빌드와 같은 대체 규칙
+            p = self.paths[(dat, mcd)]
             ents = {e['name']: e['data'] for e in read_dat(open(p, 'rb').read())}
             base = mcd[:-4]
             T = parse_wta(ents[base + '.wta'])
@@ -77,7 +91,7 @@ class Metrics:
             W, H = T[0]['surf']['width'], T[0]['surf']['height']
             samples = []
             for f, ch, gi in M['syms']:
-                if f != font:
+                if f != f_use:
                     continue
                 g = M['glyphs'][gi]
                 x0, y0 = int(round(g[1] * W)), int(round(g[2] * H))
@@ -86,19 +100,23 @@ class Metrics:
             if samples:
                 st = FontStyle(font, samples)
                 break
-        self._styles[font] = st
+        self._styles[key] = st
         return st
 
     def ko_char_w(self, font, ch):
-        """실제 글리프 폭. 원본에 있는 글자는 그 값, 한글은 렌더해서 잰다."""
+        """실제 글리프 폭. 원본 글리프를 그대로 쓰는 글자는 그 값, 새로 그리는 글자(한글·숫자·영문)는 렌더해서 잰다."""
         key = (font, ord(ch))
-        if key in self.char_w:
+        own = self.mcd_char_w.get(self.cur, {})
+        if not redraw(ch) and key in own:
+            return own[key]
+        if not redraw(ch) and key in self.char_w:
             return self.char_w[key]
-        if key in self._rendered:
-            return self._rendered[key]
+        rkey = (self.cur, font, ch)
+        if rkey in self._rendered:
+            return self._rendered[rkey]
         st = self._style(font)
         w = st.render(ch).shape[1] if st else self.hangul_w(font)
-        self._rendered[key] = w
+        self._rendered[rkey] = w
         return w
 
     def jp_line_widths(self, M, pa):
@@ -144,6 +162,7 @@ def split():
         if not JP_RE.search(r['ja'].replace('{k:', '')):
             continue
         M = met.mcds[(r['dat'], r['mcd'])]
+        met.cur = (r['dat'], r['mcd'])
         pa = M['msgs'][r['msg']]['paras'][r['para']]
         widths = met.jp_line_widths(M, pa)
         mx = max(widths)
@@ -176,6 +195,7 @@ def check(name, met=None, quiet=False):
             errs.append(f'#{i}: in 파일에 없는 id'); continue
         r = rows[i]
         M = met.mcds[(r['dat'], r['mcd'])]
+        met.cur = (r['dat'], r['mcd'])
         pa = M['msgs'][r['msg']]['paras'][r['para']]
         if not isinstance(ko, str) or not ko.strip():
             errs.append(f'#{i}: 빈 번역'); continue
@@ -208,6 +228,46 @@ def check(name, met=None, quiet=False):
     return errs, outs
 
 
+def check_orig(met=None, quiet=False):
+    """번역하지 않은 문단(영문·숫자)도 숫자·영문자를 새로 그리면 폭이 바뀐다 -> 원본 폭 한도와 비교"""
+    met = met or Metrics()
+    ko_dir = os.path.join(os.path.dirname(WORK), 'ko')
+    done = set()
+    for p in glob.glob(os.path.join(glob.escape(ko_dir), '*.json')):
+        done |= set(json.load(open(p, encoding='utf-8')))
+    errs, n = [], 0
+    for (dat, mcd), M in met.mcds.items():
+        met.cur = (dat, mcd)
+        for mi, msg in enumerate(M['msgs']):
+            for pi, pa in enumerate(msg['paras']):
+                syms = [M['syms'][w] for l in pa['lines'] for w in l['words'][0::2] if w < 0x8000]
+                if not any(redraw(chr(s[1])) for s in syms) or f'{dat}|{mcd}|{mi}|{pi}' in done:
+                    continue
+                n += 1
+                widths = met.jp_line_widths(M, pa); mx = max(widths)
+                limit = mx if mx >= 250 else mx * 1.10
+                for li, l in enumerate(pa['lines']):
+                    w = l['words']; x = 0; i = 0
+                    while i < len(w) and w[i] != 0x8000:
+                        c, arg = w[i], w[i + 1]
+                        if c < 0x8000:
+                            f, ch, gi = M['syms'][c]
+                            gw = met.ko_char_w(f, chr(ch)) if redraw(chr(ch)) else M['glyphs'][gi][5]
+                            x += gw + l['a'] + (arg - 0x10000 if arg & 0x8000 else arg)
+                        elif c == 0x8001:
+                            x += met.font_tab[arg][1] + l['a']
+                        elif c == 0x8003:
+                            x += met.font_tab[pa['font']][2] * 0.8
+                        i += 2
+                    if x > limit:
+                        errs.append(f'{dat}|{mcd}|{mi}|{pi} {li + 1}번째 줄 {x:.0f}px > 한도 {limit:.0f}px (원본 {widths[li]:.0f}px)')
+    if not quiet:
+        print(f'[원문 유지 문단] 숫자·영문 포함 {n}개, 폭 초과 {len(errs)}')
+        for e in errs:
+            print('  ' + e)
+    return errs
+
+
 def merge():
     met = Metrics()
     allout = {}
@@ -233,3 +293,4 @@ if __name__ == '__main__':
         names = [os.path.basename(p)[3:-5] for p in sorted(glob.glob(os.path.join(glob.escape(WORK), 'in_*.json')))] if sys.argv[2] == 'all' else [sys.argv[2]]
         for n in names: check(n, met)
     elif cmd == 'merge': merge()
+    elif cmd == 'check_orig': check_orig()

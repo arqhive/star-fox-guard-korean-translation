@@ -10,7 +10,7 @@ from PIL import Image
 
 from dat_lib import read_dat, write_dat
 from mcd_lib import parse_mcd, build_mcd, text_to_words
-from font_build import build_atlas
+from font_build import build_atlas, redraw
 from cpk_lib import rebuild_cpk
 from wtb_lib import encode_into
 from text_tool import XLSX, dat_files
@@ -60,8 +60,8 @@ def build_mcd_ko(dat, name, mcd, wta, wtp, tl):
                 texts[(mi, pi)] = tl[k]; n_tl += 1
             else:
                 texts[(mi, pi)] = para_text(pa, M['syms'])
-    if n_tl == 0:
-        return None
+    if n_tl == 0 and not any(redraw(chr(ch)) for _, ch, _ in M['syms']):
+        return None  # 번역도 없고 새로 그릴 숫자·영문자도 없으면 원본 그대로
     # 필요한 (font, char) 수집
     need = _Collect()
     for mi, msg in enumerate(M['msgs']):

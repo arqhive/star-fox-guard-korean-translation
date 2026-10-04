@@ -331,6 +331,85 @@ def sheet_weights(out):
     save(canvas[:y], labels, out)
 
 
+def draw_text(canvas, M, cells, style, text, pfont, x, y, a, new):
+    """new=True: 숫자·영문도 새로 그림(변경안), False: 원본 글리프 복사(지금)"""
+    import re
+    from font_build import redraw
+    fonts = {f[0]: f for f in M['fonts']}
+    for m in re.finditer(r'\{btn:\d+\}|\{[a-z]+:-?\d+\}|.', text):
+        t = m.group()
+        if t.startswith('{btn'):
+            canvas[y + 15:y + 45, x + 4:x + 34] = (210, 170, 20); x += 40; continue
+        if t.startswith('{'):
+            continue
+        if t == ' ':
+            x += int(fonts[pfont][1] + a); continue
+        key = (pfont, ord(t))
+        cell = cells[key][0] if key in cells and not (new and redraw(t)) else style.render(t)
+        blit(canvas, cell, x, y)
+        x += cell.shape[1] + int(a)
+    return x
+
+
+def sheet_alnum(out):
+    """숫자·영문자: 원본 / 지금(원본 글리프) / 변경안(본고딕=Noto) 비교"""
+    import re
+    from text_tool import para_text
+    tl = {}
+    for p in sorted(glob.glob(os.path.join(glob.escape(ROOT), 'translation', 'ko', '*.json'))):
+        for k, v in json.load(open(p, encoding='utf-8')).items():
+            d, m, mi, pi = k.split('|')
+            tl[(d, m, int(mi), int(pi))] = v.replace('\r\n', '\n')
+    picks = [('ui_select.dat', 'messselect.mcd'), ('ui_tips.dat', 'messtips.mcd'), ('ui_hud.dat', 'messhud.mcd'),
+             ('ui_profile.dat', 'messprofile.mcd'), ('ui_result.dat', 'messresult.mcd'),
+             ('ui_title.dat', 'messtitle.mcd'), ('ui_credit.dat', 'messcredit.mcd')]
+    al = re.compile(r'[0-9A-Za-z]')
+    blocks = []
+    for dat, mcd in picks:
+        try:
+            M, cells, per_font = load(dat, mcd)
+        except (StopIteration, KeyError):
+            continue
+        styles = {}
+        got = {'tl': 0, 'orig': 0}
+        for mi, msg in enumerate(M['msgs']):
+            for pi, pa in enumerate(msg['paras']):
+                ko = tl.get((dat, mcd, mi, pi))
+                kind = 'tl' if ko else 'orig'
+                text = ko or re.sub(r'\{(?:k|f|sp):-?\d+\}', '', para_text(pa, M['syms']))
+                if not al.search(text) or got[kind] >= 2 or len(pa['lines']) > 2:
+                    continue
+                if pa['font'] not in per_font or max(len(l['words']) for l in pa['lines']) > 70:
+                    continue
+                f = pa['font']
+                if f not in styles:
+                    styles[f] = FontStyle(f, per_font[f])
+                got[kind] += 1
+                blocks.append((f'{mcd}  ·  font {f}  ·  {"번역문" if ko else "원문 유지(영문·숫자)"}',
+                               M, cells, styles[f], pa, text, bool(ko)))
+    H = 24 + sum(34 + (len(pa['lines']) * (3 if t else 2)) * (st.h + 10) + 26
+                 for _, _, _, st, pa, _, t in blocks)
+    W = 1800
+    canvas = np.zeros((H, W, 3), np.float32)
+    canvas[:] = BG
+    labels = []
+    y = 24
+    for name, M, cells, st, pa, text, is_tl in blocks:
+        labels.append((28, y, name))
+        y += 34
+        labels.append((36, y + st.h // 2 - 14, '원본'))
+        for l in pa['lines']:
+            draw_jp(canvas, M, cells, l, 260, y); y += st.h + 10
+        rows = [('지금', False), ('변경안', True)] if is_tl else [('변경안', True)]
+        for lab, new in rows:
+            labels.append((36, y + st.h // 2 - 14, lab))
+            for li, t in enumerate(text.split('\n')):
+                l = pa['lines'][min(li, len(pa['lines']) - 1)]
+                draw_text(canvas, M, cells, st, t, pa['font'], 260, y, l['a'], new); y += st.h + 10
+        y += 26
+    save(canvas[:y], labels, out)
+
+
 if __name__ == '__main__':
     {'glyphs': sheet_glyphs, 'lines': sheet_lines, 'fonts': sheet_fonts,
-     'weights': sheet_weights}[sys.argv[1]](sys.argv[2])
+     'weights': sheet_weights, 'alnum': sheet_alnum}[sys.argv[1]](sys.argv[2])

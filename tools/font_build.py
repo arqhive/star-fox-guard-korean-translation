@@ -26,16 +26,34 @@ OPEN_MIN = 0.70  # 팽창 후 글자 속공간이 팽창 전의 이 비율 밑�
 XSCALE = 0.94  # 한글 가로 축약(원본 칸이 일본어 폭 기준이라 여유 확보)
 SS = 4  # 슈퍼샘플링
 REF = '한국어글뷁빼앎'
+DIGITS = '0123456789'
+ALNUM_REDRAW = False  # True: 숫자·영문자도 한글과 같은 글꼴로 새로 그림. 실기에서 글자가 다닥다닥 붙어 보여 끔(2026-10-05), 원본 글리프 유지
+ALNUM_MIN_SCALE = 0.85  # 숫자·영문 가로 축약 하한 (원본 평균 폭에 맞추되 이보다 좁히지 않음)
 PAD = 2  # atlas 셀 사이 여백
+
+
+def _alnum_class(ch):
+    return 'digit' if ch.isdigit() else ('upper' if ch.isupper() else 'lower')
+
+
+def redraw(ch):
+    """원본 글리프 대신 새로 그릴 글자인가 (한글은 원본에 없으니 늘 새로 그림)"""
+    return ALNUM_REDRAW and ch.isascii() and ch.isalnum()
 
 
 def _is_ref(c):
     return 0x4E00 <= c <= 0x9FFF or 0xAC00 <= c <= 0xD7A3
 
 
+DILATE_HORIZONTAL = True  # 덧칠은 가로로만: 세로로도 불리면 ㅌ·ㅍ처럼 쌓인 가로획 사이가 메워진다(스타폭스 제로 「통」 사례)
+
+
 def _dilate(im, r):
     import cv2
-    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1))
+    if DILATE_HORIZONTAL:
+        k = np.ones((1, 2 * r + 1), np.uint8)
+    else:
+        k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1))
     return Image.fromarray(cv2.dilate(np.asarray(im), k))
 
 
@@ -59,10 +77,16 @@ class FontStyle:
         self.h = Counter(int(round(g[6])) for _, _, g in samples).most_common(1)[0][0]
         self.extra = Counter(tuple(g[7:10]) for _, _, g in samples).most_common(1)[0][0]
         refs = [s for s in samples if _is_ref(ord(s[0]))] or [s for s in samples if _is_kana(ord(s[0]))]
+        self.ref = REF  # 크기·두께를 맞출 때 쓰는 기준 글자
+        if not refs and ALNUM_REDRAW:
+            # 숫자·영문 전용 폰트(점수 표시 등): 원본 숫자의 높이·두께에 맞춘다
+            refs = ([s for s in samples if s[0] in DIGITS]
+                    or [s for s in samples if s[0].isascii() and s[0].isupper()])
+            self.ref = ''.join(s[0] for s in refs)
         self.from_orig = bool(refs)
         if not refs:
-            # 참조 글자가 없는 폰트(숫자 전용 등): 전체 폰트 높이로 추정
-            refs = []
+            # 참조 글자가 없는 폰트: 전체 폰트 높이로 추정
+            self.ref = REF
             self.left, self.top, self.bottom, self.rpad, self.k = 3, int(self.h * 0.2), int(self.h * 0.8), 3, 5
         else:
             boxes = []
@@ -91,6 +115,39 @@ class FontStyle:
             self._pick_weight()
         if BOLDEN and self.th_target and self._stroke_now() < self.th_target * 0.97:
             self._pick_dilation()
+        self.alnum_scale = 1.0
+        self.alnum_left, self.alnum_rpad = self.left, self.rpad
+        self._fit_alnum(samples)
+
+    def _fit_alnum(self, samples):
+        """숫자·영문자의 가로 축약률: 원본 글리프 잉크 폭의 중앙값 비율에 맞춘다(넓히지는 않음).
+        원본 영문 문단(크레딧·라벨)의 배치가 그대로 유지되게 하기 위함."""
+        def ink_w(a):
+            xs = np.nonzero(np.asarray(a).max(0) > 127)[0]
+            return xs.max() - xs.min() + 1 if len(xs) else 0
+        # 좌우 여백: 원본 영문 글리프는 한자보다 여백이 좁다 -> 원본 영문 기준으로 따로 둔다
+        sides = []
+        for ch, cell, g in samples:
+            if redraw(ch):
+                xs = np.nonzero(cell[..., 3].max(0) > 127)[0]
+                if len(xs):
+                    sides.append((xs.min(), cell.shape[1] - 1 - xs.max()))
+        if sides:
+            self.alnum_left, self.alnum_rpad = (int(round(v)) for v in np.median(np.array(sides), axis=0))
+        r = {}
+        for ch, cell, g in samples:
+            if not redraw(ch):
+                continue
+            ow, nw = ink_w(cell[..., 3]), ink_w(self.render(ch)[..., 3])
+            if ow > 2 and nw > 2:
+                r.setdefault(_alnum_class(ch), []).append(ow / nw)
+        # 숫자·대문자·소문자는 원본과 Noto 의 폭 비율이 서로 달라서 따로 맞춘다
+        self.alnum_scales = {k: float(min(1.0, max(ALNUM_MIN_SCALE, np.median(v)))) for k, v in r.items()}
+        if r:
+            self.alnum_scale = float(min(1.0, max(ALNUM_MIN_SCALE, np.median(sum(r.values(), [])))))
+
+    def _alnum_scale(self, ch):
+        return getattr(self, 'alnum_scales', {}).get(_alnum_class(ch), getattr(self, 'alnum_scale', 1.0))
 
     def _variable(self):
         try:
@@ -128,14 +185,14 @@ class FontStyle:
     def _open_now(self):
         """잉크 상자 안의 빈 곳 비율(글자 속공간) 평균"""
         v = []
-        for c in REF:
+        for c in self.ref:
             a = self.render(c)[..., 3] > 127
             ys, xs = np.nonzero(a)
             v.append(1 - a[ys.min():ys.max() + 1, xs.min():xs.max() + 1].mean())
         return float(np.mean(v))
 
     def _stroke_now(self):
-        return float(np.mean([_stroke(self.render(c)[..., 3]) for c in REF]))
+        return float(np.mean([_stroke(self.render(c)[..., 3]) for c in self.ref]))
 
     def _setup_font(self, weight):
         tgt = (self.bottom - self.top + 1) * SS
@@ -158,7 +215,7 @@ class FontStyle:
         return f
 
     def _bbox(self, font):
-        bbs = [font.getbbox(c) for c in REF]
+        bbs = [font.getbbox(c) for c in self.ref]
         return (min(b[0] for b in bbs), min(b[1] for b in bbs), max(b[2] for b in bbs), max(b[3] for b in bbs))
 
     def render(self, ch):
@@ -166,24 +223,32 @@ class FontStyle:
         (원본 UI 칸이 일본어 폭에 맞춰져 있어 여유를 두기 위함)."""
         bb = self.font.getbbox(ch)
         d = self.dil  # 팽창하면 잉크가 좌우로 d 만큼 번지므로 그만큼 안쪽에서 그린다
-        wide = self.left + (bb[2] - bb[0] + 2 * d) // SS + self.rpad + 4
-        x0 = self.left * SS + d
+        L, Rp = (getattr(self, 'alnum_left', self.left), getattr(self, 'alnum_rpad', self.rpad))             if redraw(ch) else (self.left, self.rpad)  # 숫자·영문은 원본 영문 여백
+        wide = L + (bb[2] - bb[0] + 2 * d) // SS + Rp + 4
+        x0 = L * SS + d
         im = Image.new('L', (wide * SS, self.h * SS), 0)
         ImageDraw.Draw(im).text((x0 - bb[0], self.oy), ch, fill=255, font=self.font)
-        scale = XSCALE if '가' <= ch <= '힣' else 1.0
+        scale = XSCALE if '가' <= ch <= '힣' else (self._alnum_scale(ch) if redraw(ch) else 1.0)
+        if d:  # 덧칠(팽창)로 늘어날 폭(양쪽 d)만큼 미리 좁혀서, 굵어져도 글자 폭은 그대로 둔다
+            scale -= 2 * d / max(1, bb[2] - bb[0])
         if scale != 1.0:  # 잉크만 좁히고 왼쪽 여백은 유지
             body = im.crop((x0, 0, wide * SS, self.h * SS))
             body = body.resize((max(1, round(body.width * scale)), body.height), Image.LANCZOS)
             im2 = Image.new('L', im.size, 0)
             im2.paste(body, (x0, 0))
             im = im2
-        if d:  # 원형 커널로 팽창해 획을 고르게 두껍게(모서리가 네모나지 않게)
+        if d:  # 덧칠(가로 방향 팽창)로 세로획을 두껍게
             im = _dilate(im, d)
         a = np.asarray(im.resize((wide, self.h), Image.LANCZOS))
+        if redraw(ch):  # 숫자·영문: 글꼴 자체 앞 여백을 빼고 잉크를 원본 영문 여백(L) 위치에 맞춘다
+            xs = np.nonzero(a.max(0) > 127)[0]
+            if len(xs) and xs.min() > L:
+                sh = xs.min() - L
+                a = np.pad(a[:, sh:], ((0, 0), (0, sh)))
         # 실제 잉크 기준으로 폭 결정 (getbbox 는 안티앨리어싱 여백 포함이라 1~3px 넓음)
         xs = np.nonzero(a.max(0) > 40)[0]
-        right = xs.max() + 1 if len(xs) else self.left + 1
-        w = right + self.rpad - 1
+        right = xs.max() + 1 if len(xs) else L + 1
+        w = right + Rp - 1
         a = a[:, :w] if w <= wide else np.pad(a, ((0, 0), (0, w - wide)))
         o = np.asarray(Image.fromarray(a).filter(ImageFilter.MaxFilter(self.k)))
         return np.dstack([o, o, o, a]).astype(np.uint8)
@@ -227,7 +292,7 @@ def build_atlas(M, wta, wtp, needed):
 
     cells = []
     for f, ch in needed:
-        if (f, ch) in orig_cells:
+        if (f, ch) in orig_cells and not redraw(chr(ch)):
             cell, g = orig_cells[(f, ch)]
             cells.append((f, ch, cell, list(g[5:10])))
         else:
