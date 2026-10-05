@@ -148,6 +148,25 @@ class Metrics:
         return x
 
 
+# 대사창(화면 폭을 다 쓰는 창): 문단 원문 폭이 아니라, 같은 파일·같은 폰트의 원문 대사 중 가장 긴 줄을 한도로 쓴다
+DIALOGUE_RE = re.compile(r'_(SLIPPY|FOX|PIGMA|OJI)_')
+_dlg_cache = {}
+
+
+def dialogue_limit(met, dat, mcd, font):
+    key = (dat, mcd, font)
+    if key not in _dlg_cache:
+        M = met.mcds[(dat, mcd)]
+        mx = 0
+        for r in rows_from_xlsx():
+            if r['dat'] == dat and r['mcd'] == mcd and DIALOGUE_RE.search(r['event'] or ''):
+                pa = M['msgs'][r['msg']]['paras'][r['para']]
+                if pa['font'] == font:
+                    mx = max(mx, max(met.jp_line_widths(M, pa)))
+        _dlg_cache[key] = mx
+    return _dlg_cache[key]
+
+
 def rows_from_xlsx():
     ws = openpyxl.load_workbook(XLSX).active
     for r in ws.iter_rows(min_row=2, values_only=True):
@@ -216,6 +235,8 @@ def check(name, met=None, quiet=False):
             errs.append(f'#{i}: 줄 수 초과 {len(lines)} > {len(pa["lines"])}')
         widths = met.jp_line_widths(M, pa); mx = max(widths)
         limit = mx if mx >= 250 else mx * 1.10
+        if DIALOGUE_RE.search(r['event'] or ''):
+            limit = max(limit, dialogue_limit(met, r['dat'], r['mcd'], pa['font']))
         for li, t in enumerate(lines):
             a = pa['lines'][min(li, len(pa['lines']) - 1)]['a']
             w = met.ko_line_width(t, pa['font'], a)
