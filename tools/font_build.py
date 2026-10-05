@@ -20,7 +20,10 @@ KO_FONT = r'C:\Windows\Fonts\NotoSansKR-VF.ttf'
 KO_WEIGHT = 800  # 자동 선택이 안 되는 폰트(가변 축 없음 등)에 쓰는 기본 굵기
 AUTO_WEIGHT = True  # 원본 글자의 획 두께에 맞춰 폰트(=구간)마다 굵기를 따로 고른다
 WEIGHT_RANGE = (350, 900)
-BOLDEN = True  # 최대 굵기로도 원본보다 가늘면 획을 팽창시켜(덧칠) 두께를 맞춘다
+SMALL_H = 100  # 이보다 작은 글씨는 굵기 상한을 낮춰 자음·모음 사이 틈을 지킨다
+SMALL_MAX_WEIGHT = 800  # v1.1 굵기. 898 에선 슬리피의 리·피가 붙어 보였다
+ROUND_OUTLINE = True  # 외곽선을 확대 해상도에서 둥근 커널로 그려 원본 두께에 맞춤(정사각 MaxFilter 계단 방지)
+BOLDEN = False  # 덧칠(획 팽창): 어느 방향이든 틈을 메움(사방=ㅌ, 가로=리·피) -> 끔(2026-10-06 실기 사진)
 BOLDEN_MAX = 0.12  # 팽창 상한: 글자 높이 대비 획 두께 증가량
 OPEN_MIN = 0.70  # 팽창 후 글자 속공간이 팽창 전의 이 비율 밑으로 줄면 멈춘다(르·포 틈이 막히지 않게)
 XSCALE = 0.94  # 한글 가로 축약(원본 칸이 일본어 폭 기준이라 여유 확보)
@@ -55,6 +58,15 @@ def _dilate(im, r):
     else:
         k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1))
     return Image.fromarray(cv2.dilate(np.asarray(im), k))
+
+
+def _outline_band(cell):
+    """외곽선만 있는 띠의 평균 두께(px) = 외곽선 넓이 / 글자 윤곽 길이"""
+    a = cell[..., 3]; o = cell[..., 0]
+    ring = (o > 40) & (a < 128)
+    body = a >= 128
+    edge = np.abs(np.diff(body, axis=1)).sum() + np.abs(np.diff(body, axis=0)).sum()
+    return ring.sum() / max(edge, 1)
 
 
 def _stroke(a):
@@ -118,6 +130,22 @@ class FontStyle:
         self.alnum_scale = 1.0
         self.alnum_left, self.alnum_rpad = self.left, self.rpad
         self._fit_alnum(samples)
+        self.ol = 0  # 둥근 외곽선 반경(슈퍼샘플 px), 0이면 예전 MaxFilter(k)
+        if ROUND_OUTLINE and refs:
+            self.ol_target = float(np.mean([_outline_band(c) for _, c, _ in refs[:16]]))
+            self._pick_outline()
+
+    def _pick_outline(self):
+        """원본 외곽선 평균 두께(px)에 맞는 둥근 외곽선 반경을 고른다"""
+        best, err = 0, None
+        for r in range(1, 6 * SS + 1):
+            self.ol = r
+            e = abs(float(np.mean([_outline_band(self.render(c)) for c in self.ref])) - self.ol_target)
+            if err is None or e < err:
+                best, err = r, e
+            elif e > err:
+                break
+        self.ol = best
 
     def _fit_alnum(self, samples):
         """숫자·영문자의 가로 축약률: 원본 글리프 잉크 폭의 중앙값 비율에 맞춘다(넓히지는 않음).
@@ -159,6 +187,8 @@ class FontStyle:
     def _pick_weight(self):
         """원본 획 두께에 가장 가까운 굵기를 이분 탐색으로 고른다"""
         lo, hi = WEIGHT_RANGE
+        if self.h < SMALL_H:
+            hi = min(hi, SMALL_MAX_WEIGHT)
         for _ in range(7):
             mid = (lo + hi) / 2
             self._setup_font(mid)
@@ -239,7 +269,9 @@ class FontStyle:
             im = im2
         if d:  # 덧칠(가로 방향 팽창)로 세로획을 두껍게
             im = _dilate(im, d)
+        im_ss = im
         a = np.asarray(im.resize((wide, self.h), Image.LANCZOS))
+        sh = 0
         if redraw(ch):  # 숫자·영문: 글꼴 자체 앞 여백을 빼고 잉크를 원본 영문 여백(L) 위치에 맞춘다
             xs = np.nonzero(a.max(0) > 127)[0]
             if len(xs) and xs.min() > L:
@@ -250,7 +282,18 @@ class FontStyle:
         right = xs.max() + 1 if len(xs) else L + 1
         w = right + Rp - 1
         a = a[:, :w] if w <= wide else np.pad(a, ((0, 0), (0, w - wide)))
-        o = np.asarray(Image.fromarray(a).filter(ImageFilter.MaxFilter(self.k)))
+        if getattr(self, 'ol', 0):  # 확대 해상도에서 둥글게 팽창한 뒤 줄여 매끈한 외곽선
+            import cv2
+            r = self.ol
+            k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1))
+            o_ss = Image.fromarray(cv2.dilate(np.asarray(im_ss), k))
+            if sh:
+                o_ss = o_ss.transform(o_ss.size, Image.AFFINE, (1, 0, sh * SS, 0, 1, 0))
+            o = np.asarray(o_ss.resize((wide, self.h), Image.LANCZOS))
+            o = o[:, :w] if w <= wide else np.pad(o, ((0, 0), (0, w - wide)))
+            o = np.maximum(o, a)
+        else:
+            o = np.asarray(Image.fromarray(a).filter(ImageFilter.MaxFilter(self.k)))
         return np.dstack([o, o, o, a]).astype(np.uint8)
 
 
