@@ -23,6 +23,10 @@ WEIGHT_RANGE = (350, 900)
 SMALL_H = 100  # 이보다 작은 글씨는 굵기 상한을 낮춰 자음·모음 사이 틈을 지킨다
 SMALL_MAX_WEIGHT = 800  # v1.1 굵기. 898 에선 슬리피의 리·피가 붙어 보였다
 OUTLINE_SCALE = 1.0  # 원본 두께에 맞춘 외곽선 반경에 곱하는 배율(두껍게 하면 화면에서 덜 지저분해 보임)
+TRACK_RATIO = 0.12  # 한글 글자 사이 틈(잉크~잉크)을 글자 높이의 이 비율 이상으로. 줄 자간이 −10쯤인 제목·라벨 폰트에서 글자가 붙어 보였다(대사 폰트는 원래 0.12)
+TRACK_CAPS = None  # {(dat, mcd, font): 최대 추가 여백}. 줄이 넘치지 않는 한도(tl_tool.track_caps). None 이면 제한 없음, {} 이면 전부 0
+CUR_KEY = None  # 지금 만드는 글꼴의 (dat, mcd) — TRACK_CAPS 조회용
+BODY_BOX = True  # 글자 본체를 줄일 때 BOX(면적 평균). LANCZOS 는 획 바깥에 옅은 물결(링잉)을 남겨 외곽선 안에 밝은 점·줄이 생겼다
 SUBPIXEL_ALIGN = True  # 잉크 정렬을 확대(SS) 단계에서 0.25px 단위로. False 면 줄인 뒤 정수 px 정렬(예전)
 INK_ALIGN = True  # 새로 그린 글자의 잉크 시작을 왼쪽 여백(L)에 정확히 맞춤. 끄면 글꼴 상자 기준이라 글자마다 1~3px씩 어긋나 자간이 들쭉날쭉
 ROUND_OUTLINE = True  # 외곽선을 확대 해상도에서 둥근 커널로 그려 원본 두께에 맞춤(정사각 MaxFilter 계단 방지)
@@ -87,9 +91,11 @@ def _is_kana(c):
 class FontStyle:
     """원본 MCD 안의 한 폰트(id)에 대한 측정값 + 한글 렌더러"""
 
-    def __init__(self, fid, samples):
+    def __init__(self, fid, samples, line_a=0.0):
         # samples: [(char, rgba cell, glyph record)]
         self.fid = fid
+        self.line_a = line_a  # 이 폰트 줄들의 자간(MCD 줄 설정 a, 보통 음수)
+        self.track = 0  # 한글 칸 오른쪽에 더하는 여백(px)
         self.h = Counter(int(round(g[6])) for _, _, g in samples).most_common(1)[0][0]
         self.extra = Counter(tuple(g[7:10]) for _, _, g in samples).most_common(1)[0][0]
         refs = [s for s in samples if _is_ref(ord(s[0]))] or [s for s in samples if _is_kana(ord(s[0]))]
@@ -134,6 +140,7 @@ class FontStyle:
         self.alnum_scale = 1.0
         self.alnum_left, self.alnum_rpad = self.left, self.rpad
         self._fit_alnum(samples)
+        self._fit_track()
         self.ol = 0  # 둥근 외곽선 반경(슈퍼샘플 px), 0이면 예전 MaxFilter(k)
         if ROUND_OUTLINE and refs:
             self._pick_outline(samples)
@@ -161,6 +168,21 @@ class FontStyle:
             if err is None or e < err:
                 best, err = r, e
         self.ol = best
+
+    def _fit_track(self):
+        """한글 글자 사이 틈이 TRACK_RATIO x 높이보다 좁으면 모자란 만큼 칸 오른쪽 여백을 더한다"""
+        gaps = []
+        for ch in '가나다라마바사아자차':
+            a = self.render(ch)[..., 3]
+            xs = np.nonzero(a.max(0) > 127)[0]
+            if len(xs):
+                gaps.append(xs.min() + (a.shape[1] - 1 - xs.max()))
+        if gaps:
+            gap = float(np.median(gaps)) + self.line_a
+            self.track = max(0, int(round(TRACK_RATIO * self.h - gap)))
+        if TRACK_CAPS is not None:  # 이 폰트를 쓰는 번역 줄이 넘치지 않는 한도까지만
+            key = (CUR_KEY or (None, None)) + (self.fid,)
+            self.track = min(self.track, TRACK_CAPS.get(key, 0))
 
     def _fit_alnum(self, samples):
         """숫자·영문자의 가로 축약률: 원본 글리프 잉크 폭의 중앙값 비율에 맞춘다(넓히지는 않음).
@@ -300,12 +322,14 @@ class FontStyle:
                 ink_r = (int(cols.max()) - dx + 1) / SS  # 잉크 오른쪽 끝(px, 0.25 단위)
         im_ss = im
         sh = 0
-        a = np.asarray(im.resize((wide, self.h), Image.LANCZOS))
+        a = np.asarray(im.resize((wide, self.h), Image.BOX if BODY_BOX else Image.LANCZOS))
         if not SUBPIXEL_ALIGN and (INK_ALIGN or redraw(ch)):  # 예전 방식: 줄인 뒤 정수 px 로 맞춤
             xs = np.nonzero(a.max(0) > 127)[0]
             if len(xs) and xs.min() > L:
                 sh = xs.min() - L
                 a = np.pad(a[:, sh:], ((0, 0), (0, sh)))
+        if '가' <= ch <= '힣':
+            Rp += getattr(self, 'track', 0)
         if ink_r is not None:  # 칸 오른쪽 = 잉크 끝(반올림) + 오른쪽 여백 -> 틈 오차 ±0.5px 이내
             w = int(np.floor(ink_r + 0.5)) + Rp - 1
         else:
@@ -327,6 +351,12 @@ class FontStyle:
         else:
             o = np.asarray(Image.fromarray(a).filter(ImageFilter.MaxFilter(self.k)))
         return np.dstack([o, o, o, a]).astype(np.uint8)
+
+
+def font_line_a(M, fid):
+    """MCD 안에서 이 폰트를 쓰는 줄들의 자간(a) 중앙값"""
+    v = [l['a'] for m in M['msgs'] for pa in m['paras'] if pa['font'] == fid for l in pa['lines']]
+    return float(np.median(v)) if v else 0.0
 
 
 def _pow2(x):
@@ -362,7 +392,7 @@ def build_atlas(M, wta, wtp, needed):
             src = per_font.get(f)
             if src is None:  # 원본에 없는 폰트: 가장 가까운 id 로 대체
                 src = per_font[min(per_font, key=lambda x: abs(x - f))]
-            styles[f] = FontStyle(f, src)
+            styles[f] = FontStyle(f, src, line_a=font_line_a(M, f))
         return styles[f]
 
     cells = []

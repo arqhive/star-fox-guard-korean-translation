@@ -98,7 +98,10 @@ class Metrics:
                 x1, y1 = int(round(g[3] * W)), int(round(g[4] * H))
                 samples.append((chr(ch), img[y0:y1, x0:x1], g))
             if samples:
-                st = FontStyle(font, samples)
+                import font_build
+                from font_build import font_line_a
+                font_build.CUR_KEY = self.cur
+                st = FontStyle(font, samples, line_a=font_line_a(self.mcds[self.cur] if self.cur else M, font))
                 break
         self._styles[key] = st
         return st
@@ -249,6 +252,43 @@ def check(name, met=None, quiet=False):
     return errs, outs
 
 
+def track_caps():
+    """폰트·파일마다 한글 칸에 더할 수 있는 최대 여백(px): 그 폰트를 쓰는 번역 줄이 하나도 넘치지 않는 한도.
+    폭은 한글 글자 수 x 여백만큼 늘어나므로, 여백 0 일 때의 폭에서 거꾸로 계산한다."""
+    import font_build
+    old = font_build.TRACK_CAPS
+    font_build.TRACK_CAPS = {}  # 여백 0 으로 재기
+    try:
+        met = Metrics()
+        ko = {}
+        for p in glob.glob(os.path.join(glob.escape(os.path.join(os.path.dirname(WORK), 'ko')), '*.json')):
+            for k, v in json.load(open(p, encoding='utf-8')).items():
+                d, m, mi, pi = k.split('|')
+                ko[(d, m, int(mi), int(pi))] = v.replace('\r\n', '\n')
+        ev = {(r['dat'], r['mcd'], r['msg'], r['para']): r['event'] for r in rows_from_xlsx()}
+        caps = {}
+        for (dat, mcd, mi, pi), text in ko.items():
+            M = met.mcds[(dat, mcd)]
+            met.cur = (dat, mcd)
+            pa = M['msgs'][mi]['paras'][pi]
+            mx = max(met.jp_line_widths(M, pa))
+            limit = mx if mx >= 250 else mx * 1.10
+            if DIALOGUE_RE.search(ev.get((dat, mcd, mi, pi)) or ''):
+                limit = max(limit, dialogue_limit(met, dat, mcd, pa['font']))
+            key = (dat, mcd, pa['font'])
+            for li, t in enumerate(text.split('\n')):
+                n = sum('가' <= c <= '힣' for c in t)
+                if not n:
+                    continue
+                a = pa['lines'][min(li, len(pa['lines']) - 1)]['a']
+                w0 = met.ko_line_width(t, pa['font'], a)
+                c = max(0, int((limit - w0) // n))
+                caps[key] = min(caps.get(key, 99), c)
+        return caps
+    finally:
+        font_build.TRACK_CAPS = old
+
+
 def check_orig(met=None, quiet=False):
     """번역하지 않은 문단(영문·숫자)도 숫자·영문자를 새로 그리면 폭이 바뀐다 -> 원본 폭 한도와 비교"""
     met = met or Metrics()
@@ -308,6 +348,9 @@ def merge():
 
 if __name__ == '__main__':
     cmd = sys.argv[1]
+    if cmd in ('check', 'merge'):
+        import font_build
+        font_build.TRACK_CAPS = track_caps()
     if cmd == 'split': split()
     elif cmd == 'check':
         met = Metrics()

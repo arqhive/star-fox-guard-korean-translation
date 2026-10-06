@@ -69,6 +69,8 @@ def build_mcd_ko(dat, name, mcd, wta, wtp, tl):
             for line in texts[(mi, pi)].split('\n'):
                 text_to_words(line, need, pa['font'])
     needed = sorted(k for k in need if isinstance(k, tuple))
+    import font_build
+    font_build.CUR_KEY = (dat, name)
     nwta, nwtp, symidx, atlas, styles = build_atlas(M, wta, wtp, needed)
     for mi, msg in enumerate(M['msgs']):
         for pi, pa in enumerate(msg['paras']):
@@ -105,6 +107,8 @@ def main():
     only = set(args.only.split(',')) if args.only else None
     tl = load_translations()
     print('번역 행', len(tl))
+    import font_build, tl_tool  # 한글 자간 여백 한도(줄이 넘치지 않는 만큼)
+    font_build.TRACK_CAPS = tl_tool.track_caps()
     repl = {}
     for p in dat_files():
         dat = os.path.basename(p).split('_', 1)[1]
