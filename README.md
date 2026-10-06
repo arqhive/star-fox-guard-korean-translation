@@ -23,7 +23,7 @@
 
 ### 적용 방법
 
-1. [배포 페이지](../../releases/latest)에서 `StarFoxGuard_KO_v1.1.zip`을 받아 폴더째 압축을 풉니다.
+1. [배포 페이지](../../releases/latest)에서 `BWFJ_KPatch_v1.1.zip`을 받아 폴더째 압축을 풉니다.
 2. 원본 `data000.cpk`를 `패치하기.bat`에 끌어다 놓습니다. 패처가 원본 MD5를 검사한 뒤 `out` 폴더에 한글판 `data000.cpk`를 만들고, 결과 MD5도 검사합니다. 원본 파일은 바뀌지 않습니다.
 3. 결과 파일의 확인값을 아래 표와 비교합니다.
 4. 결과 파일을 SD 카드의 `wiiu\sdcafiine\00050000101BEB00\KoreanTranslation\content\data000.cpk`에 넣고, Aroma에서 SDCafiine을 켠 채 게임을 실행합니다.
