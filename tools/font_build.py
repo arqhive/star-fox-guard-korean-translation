@@ -22,6 +22,9 @@ AUTO_WEIGHT = True  # 원본 글자의 획 두께에 맞춰 폰트(=구간)마�
 WEIGHT_RANGE = (350, 900)
 SMALL_H = 100  # 이보다 작은 글씨는 굵기 상한을 낮춰 자음·모음 사이 틈을 지킨다
 SMALL_MAX_WEIGHT = 800  # v1.1 굵기. 898 에선 슬리피의 리·피가 붙어 보였다
+OUTLINE_SCALE = 1.0  # 원본 두께에 맞춘 외곽선 반경에 곱하는 배율(두껍게 하면 화면에서 덜 지저분해 보임)
+SUBPIXEL_ALIGN = True  # 잉크 정렬을 확대(SS) 단계에서 0.25px 단위로. False 면 줄인 뒤 정수 px 정렬(예전)
+INK_ALIGN = True  # 새로 그린 글자의 잉크 시작을 왼쪽 여백(L)에 정확히 맞춤. 끄면 글꼴 상자 기준이라 글자마다 1~3px씩 어긋나 자간이 들쭉날쭉
 ROUND_OUTLINE = True  # 외곽선을 확대 해상도에서 둥근 커널로 그려 원본 두께에 맞춤(정사각 MaxFilter 계단 방지)
 BOLDEN = False  # 덧칠(획 팽창): 어느 방향이든 틈을 메움(사방=ㅌ, 가로=리·피) -> 끔(2026-10-06 실기 사진)
 BOLDEN_MAX = 0.12  # 팽창 상한: 글자 높이 대비 획 두께 증가량
@@ -61,9 +64,10 @@ def _dilate(im, r):
 
 
 def _outline_band(cell):
-    """외곽선만 있는 띠의 평균 두께(px) = 외곽선 넓이 / 글자 윤곽 길이"""
+    """화면에서 보이는 외곽선 띠의 평균 두께(px) = 외곽선 넓이 / 글자 윤곽 길이.
+    반 이상 진한 곳(o>=128)만 센다 — 옅은 가장자리까지 세면 원본 대비 88~128%로 폰트마다 어긋났다."""
     a = cell[..., 3]; o = cell[..., 0]
-    ring = (o > 40) & (a < 128)
+    ring = (o >= 128) & (a < 128)
     body = a >= 128
     edge = np.abs(np.diff(body, axis=1)).sum() + np.abs(np.diff(body, axis=0)).sum()
     return ring.sum() / max(edge, 1)
@@ -132,19 +136,30 @@ class FontStyle:
         self._fit_alnum(samples)
         self.ol = 0  # 둥근 외곽선 반경(슈퍼샘플 px), 0이면 예전 MaxFilter(k)
         if ROUND_OUTLINE and refs:
-            self.ol_target = float(np.mean([_outline_band(c) for _, c, _ in refs[:16]]))
-            self._pick_outline()
+            self._pick_outline(samples)
+            self.ol = max(1, round(self.ol * OUTLINE_SCALE))
 
-    def _pick_outline(self):
-        """원본 외곽선 평균 두께(px)에 맞는 둥근 외곽선 반경을 고른다"""
+    def _pick_outline(self, samples):
+        """원본 게임이 외곽선을 만든 팽창 반경을 찾는다: 원본 글리프의 본체(알파)를 둥글게 넓혀
+        원본 외곽선(RGB)과 픽셀이 가장 잘 맞는 반경. 한글에 같은 반경을 쓰면 원본 글자(!, 숫자 등)와
+        외곽선 두께가 글자 모양과 상관없이 같아진다(평균 두께로 맞추면 폰트마다 80~128%로 어긋났다)."""
+        import cv2
+        cells = [c for _, c, _ in samples[:40]]
+        bigs = []
+        for cell in cells:
+            a = cell[..., 3]
+            h, w = a.shape
+            bigs.append((np.asarray(Image.fromarray(np.ascontiguousarray(a)).resize((w * SS, h * SS), Image.LANCZOS)),
+                         a.astype(int), cell[..., 0].astype(int), (w, h)))
         best, err = 0, None
-        for r in range(1, 6 * SS + 1):
-            self.ol = r
-            e = abs(float(np.mean([_outline_band(self.render(c)) for c in self.ref])) - self.ol_target)
+        for r in range(2, 5 * SS + 1):
+            k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1))
+            e = 0.0
+            for big, a, o_ref, (w, h) in bigs:
+                o = np.asarray(Image.fromarray(cv2.dilate(big, k)).resize((w, h), Image.BOX)).astype(int)
+                e += np.abs(np.maximum(o, a) - o_ref).mean()
             if err is None or e < err:
                 best, err = r, e
-            elif e > err:
-                break
         self.ol = best
 
     def _fit_alnum(self, samples):
@@ -269,18 +284,35 @@ class FontStyle:
             im = im2
         if d:  # 덧칠(가로 방향 팽창)로 세로획을 두껍게
             im = _dilate(im, d)
+        ink_r = None
+        if SUBPIXEL_ALIGN and (INK_ALIGN or redraw(ch)):
+            # 확대(SS) 단계에서 잉크 시작을 왼쪽 여백 L 에 0.25px 단위로 정확히 맞춘다.
+            # (줄인 뒤 정수 px 로 맞추면 글자마다 0~1px 자투리가 남아 화면에서 자간이 들쭉날쭉했다)
+            arr = np.asarray(im)
+            cols = np.nonzero(arr.max(0) > 127)[0]
+            if len(cols):
+                dx = int(cols.min()) - L * SS
+                if dx > 0:
+                    arr = np.pad(arr[:, dx:], ((0, 0), (0, dx)))
+                elif dx < 0:
+                    arr = np.pad(arr[:, :dx], ((0, 0), (-dx, 0)))
+                im = Image.fromarray(np.ascontiguousarray(arr))
+                ink_r = (int(cols.max()) - dx + 1) / SS  # 잉크 오른쪽 끝(px, 0.25 단위)
         im_ss = im
-        a = np.asarray(im.resize((wide, self.h), Image.LANCZOS))
         sh = 0
-        if redraw(ch):  # 숫자·영문: 글꼴 자체 앞 여백을 빼고 잉크를 원본 영문 여백(L) 위치에 맞춘다
+        a = np.asarray(im.resize((wide, self.h), Image.LANCZOS))
+        if not SUBPIXEL_ALIGN and (INK_ALIGN or redraw(ch)):  # 예전 방식: 줄인 뒤 정수 px 로 맞춤
             xs = np.nonzero(a.max(0) > 127)[0]
             if len(xs) and xs.min() > L:
                 sh = xs.min() - L
                 a = np.pad(a[:, sh:], ((0, 0), (0, sh)))
-        # 실제 잉크 기준으로 폭 결정 (getbbox 는 안티앨리어싱 여백 포함이라 1~3px 넓음)
-        xs = np.nonzero(a.max(0) > 40)[0]
-        right = xs.max() + 1 if len(xs) else L + 1
-        w = right + Rp - 1
+        if ink_r is not None:  # 칸 오른쪽 = 잉크 끝(반올림) + 오른쪽 여백 -> 틈 오차 ±0.5px 이내
+            w = int(np.floor(ink_r + 0.5)) + Rp - 1
+        else:
+            # 실제 잉크 기준으로 폭 결정 (getbbox 는 안티앨리어싱 여백 포함이라 1~3px 넓음)
+            xs = np.nonzero(a.max(0) > 40)[0]
+            right = xs.max() + 1 if len(xs) else L + 1
+            w = right + Rp - 1
         a = a[:, :w] if w <= wide else np.pad(a, ((0, 0), (0, w - wide)))
         if getattr(self, 'ol', 0):  # 확대 해상도에서 둥글게 팽창한 뒤 줄여 매끈한 외곽선
             import cv2
@@ -289,7 +321,7 @@ class FontStyle:
             o_ss = Image.fromarray(cv2.dilate(np.asarray(im_ss), k))
             if sh:
                 o_ss = o_ss.transform(o_ss.size, Image.AFFINE, (1, 0, sh * SS, 0, 1, 0))
-            o = np.asarray(o_ss.resize((wide, self.h), Image.LANCZOS))
+            o = np.asarray(o_ss.resize((wide, self.h), Image.BOX))  # BOX: LANCZOS 의 가장자리 물결(링잉) 없이 줄임
             o = o[:, :w] if w <= wide else np.pad(o, ((0, 0), (0, w - wide)))
             o = np.maximum(o, a)
         else:
