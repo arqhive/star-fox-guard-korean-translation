@@ -3,7 +3,7 @@
 *Star Fox Guard* (Wii U, 일본판 `WUP-P-BWFJ` / `00050000101BEB00`) 비공식 한국어 팬 패치입니다.
 대사는 일본어판 원문을 기준으로 번역했습니다.
 
-**제작: arqhive** · **최신 버전: [v1.1](../../releases/tag/v1.1)**
+**제작: arqhive** · **최신 버전: [v1.2f](../../releases/tag/v1.2f) (완성판)**
 
 - 게임 안의 일본어 텍스트 1,529문단을 모두 한글화했습니다(메뉴, 튜토리얼, 스토리 대사, 방해 통신, 도움말, 크레딧).
 - 글자는 원본 UI 글꼴 모양에 맞춰 Noto Sans KR 기반으로 새로 그렸으며, MCD 파일마다 전용 글리프 아틀라스를 다시 만들었습니다.
@@ -23,7 +23,7 @@
 
 ### 적용 방법
 
-1. [배포 페이지](../../releases/latest)에서 `BWFJ_KPatch_v1.1.zip`을 받아 폴더째 압축을 풉니다.
+1. [배포 페이지](../../releases/latest)에서 `BWFJ_KPatch_v1.2f.zip`을 받아 폴더째 압축을 풉니다.
 2. 원본 `data000.cpk`를 `패치하기.bat`에 끌어다 놓습니다. 패처가 원본 MD5를 검사한 뒤 `out` 폴더에 한글판 `data000.cpk`를 만들고, 결과 MD5도 검사합니다. 원본 파일은 바뀌지 않습니다.
 3. 결과 파일의 확인값을 아래 표와 비교합니다.
 4. 결과 파일을 SD 카드의 `wiiu\sdcafiine\00050000101BEB00\KoreanTranslation\content\data000.cpk`에 넣고, Aroma에서 SDCafiine을 켠 채 게임을 실행합니다.
@@ -32,12 +32,12 @@
 
 ### 파일 확인값
 
-| 항목 | 원본 일본판 `data000.cpk` | 패치 적용 결과 (v1.1) |
+| 항목 | 원본 일본판 `data000.cpk` | 패치 적용 결과 (v1.2f) |
 |---|---|---|
-| 크기 | 469,484,032 바이트 | 572,957,184 바이트 |
-| CRC32 | `C784C69A` | `A7CCB682` |
-| MD5 | `3ba7b1e862cfff770066b5792381c264` | `9181ea49e6b5276b2dc11bda08ec45a5` |
-| SHA-1 | `66fc224894138bd54633dc88bf47445ef4e0f81b` | `df5ce1eec0fb34e0a9c47adb0650c11dad0b236d` |
+| 크기 | 469,484,032 바이트 | 572,695,040 바이트 |
+| CRC32 | `C784C69A` | `E57F729A` |
+| MD5 | `3ba7b1e862cfff770066b5792381c264` | `940d8398ecfbddb4d38419ad4e03b1d4` |
+| SHA-1 | `66fc224894138bd54633dc88bf47445ef4e0f81b` | `792a3535a8241e90788beac50df6fb14f13f0801` |
 
 원본 파일 위치: `content/data000.cpk` (타이틀 ID `00050000101BEB00`)
 
@@ -68,7 +68,7 @@ python tools/build.py --only ui_title.dat
 ```
 
 결과는 `build/sdcafiine/00050000101BEB00/KoreanTranslation/content/data000.cpk`에 생깁니다.
-위 확인값은 v1.1 그림을 반영한 결과입니다. 그림 생성 입력과 재생성 방법은 [`docs/GRAPHICS_V11.md`](docs/GRAPHICS_V11.md)를 참고하세요.
+위 확인값은 v1.2f 결과입니다. 그림 생성 입력과 재생성 방법은 [`docs/GRAPHICS_V11.md`](docs/GRAPHICS_V11.md)를 참고하세요.
 
 `build.py`는 다음을 수행합니다.
 
@@ -93,7 +93,7 @@ python tools/tl_tool.py merge          # 검수 결과를 엑셀에 반영
 ### 배포 꾸러미 만들기
 
 ```bash
-python tools/make_release.py --version v1.1  # 원본과 빌드를 비교해 release/patcher/payload 생성
+python tools/make_release.py --version v1.2f  # 원본과 빌드를 비교해 release/patcher/payload 생성
 ```
 
 `payload`에는 한글 MCD와 글리프 아틀라스, 그리고 한글로 고친 텍스처에서 달라진 바이트 구간만 담깁니다.
